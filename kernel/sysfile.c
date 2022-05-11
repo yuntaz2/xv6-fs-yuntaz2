@@ -313,6 +313,12 @@ sys_open(void)
       iunlockput(ip);
       end_op();
       return -1;
+    } else if (ip->type == T_TRAP) {
+      iunlockput(ip);
+      end_op();
+      printf("Hit trap!\n");
+      panic("Trapfile!"); // This will kill the kernel
+      return -1;
     }
   }
 
@@ -483,4 +489,40 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+uint64 sys_trapfile(void)
+{
+  char path[MAXPATH];
+  struct inode *ip;
+
+  if (argstr(0, path, MAXPATH) < 0)
+    return -1;
+  
+  // begin operation replay if crash
+  begin_op();
+  // create an inode pointer specificly for trap file
+  ip = create(path, T_TRAP, 0, 0);
+  // if it's not able to create -> fail
+  if (ip == 0)
+    goto bad;
+
+  // fill random information
+  int fill[5];
+  for (int i = 0; i < 5; ++i)
+  {
+    fill[i] = 5;
+  }
+  if (writei(ip, 0, (uint64)&fill, 0, sizeof(int) * 5) != (sizeof(int) * 5))
+    goto badl;
+  iunlockput(ip);
+  end_op();
+    
+  return 0;
+
+  badl:
+    iunlock(ip);
+  bad:
+    end_op();
+    return -1;
 }
