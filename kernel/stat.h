@@ -2,6 +2,7 @@
 #define T_FILE    2   // File
 #define T_DEVICE  3   // Device
 #define T_TRAP    4   // Trap
+#define T_SYMLINK 5   // Simbolic Link
 
 struct stat {
   int dev;     // File system's disk device

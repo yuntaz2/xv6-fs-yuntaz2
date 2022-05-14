@@ -491,7 +491,8 @@ sys_pipe(void)
   return 0;
 }
 
-uint64 sys_trapfile(void)
+uint64
+sys_trapfile(void)
 {
   char path[MAXPATH];
   struct inode *ip;
@@ -522,6 +523,62 @@ uint64 sys_trapfile(void)
 
   badl:
     iunlock(ip);
+  bad:
+    end_op();
+    return -1;
+}
+
+uint64 sys_symlink(void)
+{
+  char path[MAXPATH];
+  char target[MAXPATH];
+  struct inode *ip, *ip_parent;
+  char name[DIRSIZ];
+  
+  if (argstr(0, path, MAXPATH) < 0){
+    printf("Fail to get path.\n");
+    return -1;
+    }
+  if (argstr(1, target, MAXPATH) < 0){
+    printf("Fail to get target.\n");
+    return -1;
+  }
+
+  begin_op();
+
+  ip = namei(target);
+  if (ip){
+    ilock(ip);
+    if (ip->type == T_DIR){
+      iunlockput(ip);
+      goto bad;
+    }
+    ip->nlink++;
+    iupdate(ip);
+    iunlockput(ip);
+  }
+  
+  ip_parent = namei(path);
+  if (0 == ip_parent){
+    ip_parent = nameiparent(path, name); // name
+    if (0 == ip_parent){
+      printf("No inode exists at path\n");
+      goto bad;
+    }
+    ip_parent = create(path, T_SYMLINK, 0, 0);
+    if (0 == ip_parent){
+      printf("Create inode path failed.\n");
+      goto bad;
+    }
+    iunlock(ip_parent);
+  }
+
+  ilock(ip_parent);
+  writei(ip_parent, 0, (uint64)target, ip_parent->size, MAXPATH);
+  ip_parent->type = T_SYMLINK;
+  iunlockput(ip_parent);
+
+
   bad:
     end_op();
     return -1;
