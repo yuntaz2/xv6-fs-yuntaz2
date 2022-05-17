@@ -16,6 +16,8 @@
 #include "file.h"
 #include "fcntl.h"
 
+#define MAX_DEPTH 10
+
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
 static int
@@ -283,6 +285,29 @@ create(char *path, short type, short major, short minor)
   return ip;
 }
 
+struct inode* rlink(char *path, int omode, unsigned char depth)
+{
+  struct inode *ip;
+
+  if(depth > MAX_DEPTH)	
+    return 0;
+  if((ip = namei(path)) == 0)
+    return 0;
+
+  ilock(ip);
+
+  if(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW))
+  {	    
+    char link[MAXPATH];
+    readi(ip, 0, (uint64)link, ip->size - MAXPATH, MAXPATH);
+    iunlock(ip);
+    return rlink(link, omode, depth + 1);
+  }
+
+  iunlock(ip);
+  return ip;
+}
+
 uint64
 sys_open(void)
 {
@@ -304,10 +329,11 @@ sys_open(void)
       return -1;
     }
   } else {
-    if((ip = namei(path)) == 0){
+    if((ip = rlink(path, omode, 0)) == 0)
+    {
       end_op();
       return -1;
-    }
+    }	    
     ilock(ip);
     if(ip->type == T_DIR && omode != O_RDONLY){
       iunlockput(ip);
@@ -528,56 +554,35 @@ sys_trapfile(void)
     return -1;
 }
 
-uint64 sys_symlink(void)
+uint64
+sys_symlink(void)
 {
-  char path[MAXPATH];
-  char target[MAXPATH];
-  struct inode *ip, *ip_parent;
-  char name[DIRSIZ];
-  
-  if (argstr(0, path, MAXPATH) < 0){
-    printf("Fail to get path.\n");
+  char path[MAXPATH], target[MAXPATH];
+
+  struct inode *dp,*ip ;
+
+  if(argstr(0,target,MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
     return -1;
-    }
-  if (argstr(1, target, MAXPATH) < 0){
-    printf("Fail to get target.\n");
-    return -1;
-  }
 
   begin_op();
 
-  ip = namei(target);
-  if (ip){
+  if((ip = namei(target)))
+  {
     ilock(ip);
-    if (ip->type == T_DIR){
-      iunlockput(ip);
-      goto bad;
-    }
     ip->nlink++;
     iupdate(ip);
-    iunlockput(ip);
-  }
-  
-  ip_parent = namei(path);
-  if (0 == ip_parent){
-    ip_parent = nameiparent(path, name); // name
-    if (0 == ip_parent){
-      printf("No inode exists at path\n");
-      goto bad;
-    }
-    ip_parent = create(path, T_SYMLINK, 0, 0);
-    if (0 == ip_parent){
-      printf("Create inode path failed.\n");
-      goto bad;
-    }
-    iunlock(ip_parent);
+    iunlock(ip);
   }
 
-  ilock(ip_parent);
-  writei(ip_parent, 0, (uint64)target, ip_parent->size, MAXPATH);
-  ip_parent->type = T_SYMLINK;
-  iunlockput(ip_parent);
+  if((dp = create(path, T_SYMLINK, 0, 0)) == 0)
+    goto bad;
+  if ((writei(dp, 0, (uint64)target, dp->size, MAXPATH)) != (sizeof(char) * MAXPATH))
+    goto bad;
+  dp->type=T_SYMLINK;
+  iunlockput(dp);
+  end_op();
 
+  return 0;
 
   bad:
     end_op();
